@@ -6,12 +6,13 @@ from matplotlib.path import Path
 from matplotlib import pyplot as plt
 import scipy.misc as mc
 import random
+from sklearn.utils import shuffle
 from PIL import Image
 
 
 class SegmentationDataProvider:
 
-    def __init__(self, data_dir, train_percent=0.7, sample_size=224, num_class=2):
+    def __init__(self, data_dir, train_percent=0.7, sample_size=224, num_class=2, shuffle_data=True):
         self.train_data = []
         self.valid_data = []
         self.train_mask = []
@@ -31,6 +32,7 @@ class SegmentationDataProvider:
         self.valid_size = len(filenames) - self.train_size
 
         count = 0
+        valid_limit = 9
         for filename in filenames:
 
             filename_suffix = filename.split(".")[0]
@@ -40,17 +42,23 @@ class SegmentationDataProvider:
 
             if count < self.train_size:
                 self.sample_data(image, mask, contour_mask, True, sample_size)
-            else:
+            elif count < self.train_size + valid_limit:
                 self.sample_data(image, mask, contour_mask, False, sample_size)
             count += 1
         print(len(self.train_data))
         print(len(self.valid_data))
 
+        if shuffle_data:
+            shuffled_train_data, shuffled_train_mask, shuffled_train_contour = shuffle(self.train_data,
+                                                                                       self.train_mask,
+                                                                                       self.train_contour_mask,
+                                                                                      )
+            self.train_data = shuffled_train_data
+            self.train_mask = shuffled_train_mask
+            self.train_contour_mask = shuffled_train_contour
+
     def __call__(self, size):
 
-        self.index += size
-        if self.index >= self.train_size:
-            self.index = 0
         X = np.zeros((size, self.sample_size, self.sample_size, 3))
         Y = np.zeros((size, self.sample_size, self.sample_size, 2))
         Y_contour = np.zeros((size, self.sample_size, self.sample_size, 2))
@@ -88,7 +96,9 @@ class SegmentationDataProvider:
     def convert_to_onehot(self, array):
         result = np.zeros((array.shape[0], array.shape[1], self.num_class), dtype=np.float32)
         for i in range(self.num_class):
-            result[..., i] = (array == i)
+            layer = np.zeros(array.shape)
+            layer[np.where(array == i)] = 1
+            result[..., i] = layer
         return result
 
 
