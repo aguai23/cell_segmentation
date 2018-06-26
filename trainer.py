@@ -76,19 +76,22 @@ class Trainer(object):
                 for step in range(epoch * training_iters, (epoch + 1) * training_iters):
                     batch_x, batch_y, batch_y_contour = data_provider(self.batch_size)
 
-                    summary_str, _, loss = sess.run([self.summary_op, self.optimizer, self.net.cost],
-                                                    feed_dict={self.net.x: batch_x,
-                                                               self.net.mask: batch_y,
-                                                               self.net.contour_mask: batch_y_contour
-                                                               })
-                    total_loss += loss
-                    summary_writer.add_summary(summary_str, step)
-                    summary_writer.flush()
-
                     if (epoch * training_iters + step) % display_step == 0:
+                        summary_str, loss = sess.run([self.summary_op, self.net.cost],
+                                                     feed_dict={self.net.x: batch_x,
+                                                                self.net.mask: batch_y,
+                                                                self.net.contour_mask: batch_y_contour})
+                        summary_writer.add_summary(summary_str, step)
+                        summary_writer.flush()
                         logging.info("epoch {:}, step {:}, Minibatch Loss={:.4f}".format(epoch,
                                                                                          step,
                                                                                          loss))
+
+                    _, _ = sess.run([self.optimizer, self.net.cost],
+                                    feed_dict={self.net.x: batch_x,
+                                               self.net.mask: batch_y,
+                                               self.net.contour_mask: batch_y_contour
+                                               })
 
                 if epoch % verify_epoch == 0:
                     self.verification_evaluate(sess, data_provider, epoch, summary_writer)

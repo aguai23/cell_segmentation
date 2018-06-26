@@ -4,6 +4,8 @@ from tensorflow.contrib.layers import conv2d_transpose
 import logging
 import numpy as np
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+
 
 class DeepContourNet(object):
 
@@ -15,6 +17,7 @@ class DeepContourNet(object):
         self.contour_mask = tf.placeholder("float", shape=[None, sample_size, sample_size, 2])
         self.output_mask, self.output_contour = self.build_net(self.x)
         self.cost = self.get_cost(self.output_mask, self.output_contour, cost)
+        self.session = None
 
     def build_net(self, input, scope=""):
 
@@ -88,23 +91,31 @@ class DeepContourNet(object):
         save_path = saver.save(sess, model_path)
         return save_path
 
-    def predict(self, model_path, x_test, mask, contour):
-
+    def load_model(self, model_path):
         init = tf.global_variables_initializer()
-        with tf.Session() as sess:
-            # initialize variables
-            sess.run(init)
-            saver = tf.train.Saver()
-            saver.restore(sess, model_path)
-            logging.info("model restore from " + model_path)
+        # initialize variables
+        sess = tf.Session()
+        sess.run(init)
+        saver = tf.train.Saver()
+        saver.restore(sess, model_path)
+        self.session = sess
 
-            mask_dummy = np.zeros(list(x_test.shape[0:3]) + [self.n_class])
-            contour_dummy = np.zeros(list(x_test.shape[0:3]) + [self.n_class])
-            cost, output_mask, output_contour = sess.run([self.cost, self.output_mask, self.output_contour],
-                                                         feed_dict={self.x: x_test,
-                                                                    self.mask: mask,
-                                                                    self.contour_mask: contour})
-            print(cost)
+    def predict(self, x_test, mask=None, contour=None):
+        if self.session:
+            sess = self.session
+            mask_dummy = np.empty(list(x_test.shape[0:3]) + [self.n_class])
+            contour_dummy = np.empty(list(x_test.shape[0:3]) + [self.n_class])
+            if mask is not None and contour is not None:
+                cost, output_mask, output_contour = sess.run([self.cost, self.output_mask, self.output_contour],
+                                                             feed_dict={self.x: x_test,
+                                                                        self.mask: mask,
+                                                                        self.contour_mask: contour})
+                print(cost)
+            else:
+                output_mask, output_contour = sess.run([self.output_mask, self.output_contour],
+                                                       feed_dict={self.x: x_test,
+                                                                  self.mask: mask_dummy,
+                                                                  self.contour_mask: contour_dummy})
 
             output_mask = np.divide(np.exp(output_mask), np.sum(np.exp(output_mask), axis=3, keepdims=True))
             output_contour = np.divide(np.exp(output_contour), np.sum(np.exp(output_contour), axis=3, keepdims=True))
@@ -113,4 +124,6 @@ class DeepContourNet(object):
             output_mask = np.reshape(output_mask, (output_mask.shape[1], output_mask.shape[2]))
             output_contour = np.reshape(output_contour, (output_contour.shape[1], output_contour.shape[2]))
 
-        return output_mask, output_contour
+            return output_mask, output_contour
+        else:
+            raise NotImplemented("no model loaded")
