@@ -24,37 +24,34 @@ class DeepContourNet(object):
         with tf.name_scope(scope, "dcnn"):
             # down sample
             conv0 = conv2d(input, 64, [3, 3], scope="conv0", padding="SAME", batch_norm_params={})
-            conv0_out = conv2d(conv0, 64, [3, 3], scope="conv0_out", padding="SAME", batch_norm_params={})
-            maxpool0 = tf.nn.max_pool(conv0_out, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME",
+            maxpool0 = tf.nn.max_pool(conv0, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME",
                                       name="maxpool0")
 
             conv1 = conv2d(maxpool0, 128, [3, 3], scope="conv1", padding="SAME", batch_norm_params={})
-            conv1_out = conv2d(conv1, 128, [3, 3], scope="conv1_out", padding="SAME", batch_norm_params={})
-            maxpool1 = tf.nn.max_pool(conv1_out, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME",
+            maxpool1 = tf.nn.max_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME",
                                       name="maxpool1")
 
             conv2 = conv2d(maxpool1, 256, [3, 3], scope="conv2", padding="SAME", batch_norm_params={})
-            conv2_out = conv2d(conv2, 256, [3, 3], scope="conv2_out", padding="SAME", batch_norm_params={})
 
             # up sample
-            deconv0 = conv2d_transpose(conv2_out, 128, [2, 2], [2, 2], padding="SAME", activation_fn=tf.nn.relu,
+            deconv0 = conv2d_transpose(conv2, 128, [2, 2], [2, 2], padding="SAME", activation_fn=tf.nn.relu,
                                        weights_regularizer=tf.nn.l2_loss)
-            deconv0_concat = tf.concat([deconv0, conv1_out], 3)
+            deconv0_concat = tf.concat([deconv0, conv1], 3)
             deconv0_out = conv2d(deconv0_concat, 128, [3, 3], scope="deconv0_out", padding="SAME", batch_norm_params={})
 
             deconv1 = conv2d_transpose(deconv0_out, 128, [2, 2], [2, 2], padding="SAME", activation_fn=tf.nn.relu)
-            deconv1_concat = tf.concat([deconv1, conv0_out], 3)
+            deconv1_concat = tf.concat([deconv1, conv0], 3)
             deconv1_out = conv2d(deconv1_concat, 64, [3, 3], scope="deconv1_out", padding="SAME", batch_norm_params={})
 
-            deconv_contour0 = conv2d_transpose(conv2_out, 128, [2, 2], [2, 2], padding="SAME", activation_fn=tf.nn.relu,
+            deconv_contour0 = conv2d_transpose(conv2, 128, [2, 2], [2, 2], padding="SAME", activation_fn=tf.nn.relu,
                                                weights_regularizer=tf.nn.l2_loss)
-            deconv_contour0_concat = tf.concat([deconv_contour0, conv1_out], 3)
+            deconv_contour0_concat = tf.concat([deconv_contour0, conv1], 3)
             deconv_contour0_out = conv2d(deconv_contour0_concat, 128, [3, 3], scope="deconv_contour0_out",
                                          padding="SAME", batch_norm_params={})
 
             deconv_contour1 = conv2d_transpose(deconv_contour0_out, 64, [2, 2], [2, 2], padding="SAME",
                                                activation_fn=tf.nn.relu)
-            deconv_contour1_concat = tf.concat([deconv_contour1, conv0_out], 3)
+            deconv_contour1_concat = tf.concat([deconv_contour1, conv0], 3)
             deconv_contour1_out = conv2d(deconv_contour1_concat, 128, [3, 3], scope="deconv_contour1_out",
                                          padding="SAME", batch_norm_params={})
 
