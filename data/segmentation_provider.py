@@ -8,6 +8,7 @@ import scipy.misc as mc
 import random
 from sklearn.utils import shuffle
 from shutil import rmtree
+import cv2
 from PIL import Image
 
 
@@ -80,6 +81,8 @@ class SegmentationDataProvider:
                     self.sample_data(filename, image, mask,
                                      contour_mask, False, sample_size, sample_number, valid_folder)
                 count += 1
+            self.train_size = len(self.train_data)
+            self.valid_size = len(self.valid_data)
 
         else:
             # load saved data
@@ -211,8 +214,8 @@ if __name__ == "__main__":
 
     data_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/MoNuSeg Training Data/Tissue images/"
     annotation_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/MoNuSeg Training Data/Annotations/"
-    train_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/training_data/"
-    test_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/test_data/"
+    train_dir = "/home/yunzhe/norm_data/training_data/"
+    test_dir = "/home/yunzhe/norm_data/test_data/"
 
     train_number = 25
     file_count = 0
@@ -234,6 +237,7 @@ if __name__ == "__main__":
             tree = ET.parse(annotation_file)
             root = tree.getroot()
             mask = np.zeros((width, height))
+            contour_mask = np.zeros((width, height), np.uint8)
             # add_mask = np.zeros((width, height))
 
             # extract each nuclear
@@ -247,21 +251,21 @@ if __name__ == "__main__":
                 points = np.vstack((x, y)).T
                 path = Path(polygon)
                 grid = path.contains_points(points)
-                grid = grid.reshape((width, height))
+                grid = grid.reshape((width, height)).astype(np.int32)
                 mask[np.where(grid == 1)] = region_label
                 region_label += 1
-                # mask = np.logical_or(grid, mask)
+                cv2.drawContours(contour_mask, [np.asarray(polygon).astype(int)], 0, 1, 3)
 
+            train_set = set(os.listdir(train_dir))
             # save the result for training
-            contour_mask = find_contour(mask)
-            if file_count > train_number:
-                image.save(test_dir + filename_suffix + ".png")
-                np.save(test_dir + filename_suffix, mask)
-                np.save(test_dir + filename_suffix + "_contour", contour_mask)
-            else:
-                image.save(train_dir + filename_suffix + ".png")
+            if (filename_suffix + ".png") in train_set:
+                # image.save(train_dir + filename_suffix + ".png")
                 np.save(train_dir + filename_suffix, mask)
                 np.save(train_dir + filename_suffix + "_contour", contour_mask)
+            else:
+                # image.save(test_dir + filename_suffix + ".png")
+                np.save(test_dir + filename_suffix, mask)
+                np.save(test_dir + filename_suffix + "_contour", contour_mask)
             plt.imshow(contour_mask)
             plt.show()
             plt.imshow(mask)

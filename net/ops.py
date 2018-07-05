@@ -1,5 +1,5 @@
 import tensorflow as tf
-
+from tensorflow.contrib.layers import l2_regularizer
 
 def conv2d(inputs,
            num_filters_out,
@@ -9,6 +9,7 @@ def conv2d(inputs,
            activation=tf.nn.relu,
            stddev=0.01,
            bias=0.0,
+           weight_decay=0,
            batch_norm_params=None,
            trainable=True,
            scope=None,
@@ -45,8 +46,11 @@ def conv2d(inputs,
         weights_shape = [kernel_h, kernel_w,
                          num_filters_in, num_filters_out]
         weights_initializer = tf.truncated_normal_initializer(stddev=stddev)
+        regularizer = None
+        if weight_decay > 0:
+            regularizer = l2_regularizer(weight_decay)
         weights = tf.get_variable("weights", shape=weights_shape, dtype=tf.float32, initializer=weights_initializer,
-                                  trainable=trainable, regularizer=tf.nn.l2_loss)
+                                  trainable=trainable, regularizer=regularizer)
 
         conv = tf.nn.conv2d(inputs, weights, [1, stride_h, stride_w, 1],
                             padding=padding)
@@ -68,6 +72,7 @@ def fc(inputs,
        activation=tf.nn.relu,
        stddev=0.01,
        bias=0.0,
+       weight_decay=0,
        trainable=True,
        scope=None):
     """
@@ -85,8 +90,11 @@ def fc(inputs,
         num_units_in = inputs.get_shape()[1]
         weights_shape = [num_units_in, num_units_out]
         weights_initializer = tf.truncated_normal_initializer(stddev=stddev)
+        regularizer = None
+        if weight_decay > 0:
+            regularizer = l2_regularizer(weight_decay)
         weights = tf.get_variable("weights", shape=weights_shape, dtype=tf.float32, initializer=weights_initializer,
-                                  trainable=trainable)
+                                  trainable=trainable, regularizer=regularizer)
         biases_shape = [num_units_out, ]
         biases_initializer = tf.constant_initializer(bias)
         biases = tf.get_variable("biases", shape=biases_shape, dtype=tf.float32, initializer=biases_initializer,
