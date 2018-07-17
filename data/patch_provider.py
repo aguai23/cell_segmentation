@@ -4,13 +4,17 @@ import scipy.misc as mc
 import numpy as np
 from sklearn.utils import shuffle
 import matplotlib.pyplot as plt
-
+from skimage.morphology import square, dilation, erosion
 
 class PatchProvider(object):
 
     def __init__(self, train_dir, test_dir, train_percent=0.7, sample_size=51, sample_number=5000,
                  num_class=3, shuffle_data=True,
-                 resample=False, data_augmentation=False):
+                 resample=False, data_augmentation=False, test=False):
+
+        self.test_dir = test_dir
+        if test:
+            return
         # array to store the data
         self.train_data = []
         self.valid_data = []
@@ -20,7 +24,7 @@ class PatchProvider(object):
         self.index = -1
         self.sample_size = sample_size
         self.num_class = num_class
-        self.test_dir = test_dir
+
         train_folder = train_dir + "train/"
         valid_folder = train_dir + "valid/"
 
@@ -51,6 +55,10 @@ class PatchProvider(object):
                 image = mc.imread(train_dir + filename)
                 mask = np.load(train_dir + filename_suffix + ".npy")
                 contour_mask = np.load(train_dir + filename_suffix + "_contour.npy")
+
+                # normalize the image
+                image = (image - np.average(image)).astype(np.float32) / np.std(image)
+                # image = (image - np.average(image)).astype(np.float32)
 
                 if count < self.train_size:
                     self.sample_data(filename, image, mask,
@@ -96,24 +104,27 @@ class PatchProvider(object):
             for i in range(self.train_size):
                 augment_train_data.append(self.train_data[i])
                 augment_train_label.append(self.train_label[i])
+                if self.train_label[i][1] == 1 or self.train_label[i][2] == 1 or self.train_label[i][0] == 1:
 
-                augment_train_data.append(np.rot90(self.train_data[i], 1, (0,1)))
-                augment_train_label.append(self.train_label[i])
+                    augment_train_data.append(np.rot90(self.train_data[i], 1, (0,1)))
+                    augment_train_label.append(self.train_label[i])
 
-                augment_train_data.append(np.rot90(self.train_data[i], 2, (0, 1)))
-                augment_train_label.append(self.train_label[i])
+                    augment_train_data.append(np.rot90(self.train_data[i], 2, (0, 1)))
+                    augment_train_label.append(self.train_label[i])
 
-                augment_train_data.append(np.rot90(self.train_data[i], 3, (0, 1)))
-                augment_train_label.append(self.train_label[i])
+                    augment_train_data.append(np.rot90(self.train_data[i], 3, (0, 1)))
+                    augment_train_label.append(self.train_label[i])
 
-                augment_train_data.append(np.flip(self.train_data[i], 0))
-                augment_train_label.append(self.train_label[i])
+                    augment_train_data.append(np.flip(self.train_data[i], 0))
+                    augment_train_label.append(self.train_label[i])
 
-                augment_train_data.append(np.flip(self.train_data[i], 1))
-                augment_train_label.append(self.train_label[i])
+                    augment_train_data.append(np.flip(self.train_data[i], 1))
+                    augment_train_label.append(self.train_label[i])
 
             self.train_data = augment_train_data
             self.train_label = augment_train_label
+            self.train_size = len(self.train_data)
+            self.valid_size = len(self.valid_data)
 
         print("augmented train data " + str(len(self.train_data)))
         if shuffle_data:
@@ -166,83 +177,82 @@ class PatchProvider(object):
         """
         heigth, width, _ = image.shape
         half_size = int((sample_size - 1) / 2)
-        contour_points = np.where(contour_mask == 1)
-        nuclei_points = np.where(mask > 0)
-        background_points = np.where(mask == 0)
+        image = np.pad(image, ((half_size, half_size), (half_size, half_size), (0, 0)), "reflect")
+        contour_points = []
+        nuclei_points = []
+        background_points = []
+        dilation_mask = dilation(mask, square(5))
+        erosion_mask = erosion(mask, square(5))
+        for i in range(0, heigth, 2):
+            for j in range(0, width, 2):
+                if contour_mask[i][j] == 1:
+                    contour_points.append((i, j))
+                elif erosion_mask[i][j] > 0:
+                    nuclei_points.append((i, j))
+                elif dilation_mask[i][j] == 0:
+                    background_points.append((i, j))
+        np.random.shuffle(contour_points)
+        np.random.shuffle(nuclei_points)
+        np.random.shuffle(background_points)
 
         # sample contour patch
         index = 0
-        count = 0
-        while count < sample_number and index < len(contour_points[0]):
+        while index < sample_number and index < len(contour_points):
             # sample contour patch
-            x = contour_points[0][index]
-            y = contour_points[1][index]
+            x = contour_points[index][0]
+            y = contour_points[index][1]
 
             assert contour_mask[x][y] == 1
-            if x - half_size < 0 or y - half_size < 0 or x + half_size + 1 > heigth or y + half_size + 1 > width:
-                index += 1
-                continue
             if train:
-                self.train_data.append(image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                self.train_data.append(image[x: x + sample_size, y: y + sample_size, 0:3])
                 self.train_label.append(self.convert_to_onehot(2))
             else:
-                self.valid_data.append(image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                self.valid_data.append(image[x: x + sample_size, y: y + sample_size, 0:3])
                 self.valid_label.append(self.convert_to_onehot(2))
-            count += 1
             index += 1
             np.save(save_folder + filename + str(index) + "_contour",
-                    image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                    image[x: x + sample_size, y: y + sample_size, 0:3])
 
         # sample nuclei patch
         index = 0
-        count = 0
-        while count < sample_number and index < len(nuclei_points[0]):
-            x = nuclei_points[0][index]
-            y = nuclei_points[1][index]
+        while index < sample_number and index < len(nuclei_points):
+            # sample contour patch
+            x = nuclei_points[index][0]
+            y = nuclei_points[index][1]
 
-            assert mask[x][y] > 0
-            if x - half_size < 0 or y - half_size < 0 or x + half_size + 1 > heigth or y + half_size + 1 > width or \
-                    contour_mask[x][y] == 1:
-                index += 1
-                continue
+            assert mask[x][y] >= 1
             if train:
-                self.train_data.append(image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                self.train_data.append(image[x: x + sample_size, y: y + sample_size, 0:3])
                 self.train_label.append(self.convert_to_onehot(1))
             else:
-                self.valid_data.append(image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                self.valid_data.append(image[x: x + sample_size, y: y + sample_size, 0:3])
                 self.valid_label.append(self.convert_to_onehot(1))
-            count += 1
             index += 1
             np.save(save_folder + filename + str(index) + "_nuclei",
-                    image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                    image[x: x + sample_size, y: y + sample_size, 0:3])
 
         # sample background patch
         index = 0
-        count = 0
-        while count < sample_number and index < len(background_points[0]):
-            x = background_points[0][index]
-            y = background_points[1][index]
+        while index < sample_number and index < len(background_points):
+            # sample contour patch
+            x = background_points[index][0]
+            y = background_points[index][1]
 
-            assert mask[x][y] == 0
-            if x - half_size < 0 or y - half_size < 0 or x + half_size + 1 > heigth or y + half_size + 1 > width or \
-                    contour_mask[x][y] == 1:
-                index += 1
-                continue
+            assert contour_mask[x][y] == 0 and mask[x][y] == 0
             if train:
-                self.train_data.append(image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                self.train_data.append(image[x: x + sample_size, y: y + sample_size, 0:3])
                 self.train_label.append(self.convert_to_onehot(0))
             else:
-                self.valid_data.append(image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                self.valid_data.append(image[x: x + sample_size, y: y + sample_size, 0:3])
                 self.valid_label.append(self.convert_to_onehot(0))
-            count += 1
             index += 1
             np.save(save_folder + filename + str(index) + "_background",
-                    image[x - half_size: x + half_size + 1, y - half_size: y + half_size + 1, 0:3])
+                    image[x: x + sample_size, y: y + sample_size, 0:3])
 
 
 if __name__ == "__main__":
-    data_provider = PatchProvider("/home/cell/norm_data/training_data/",
-                                  "/home/cell/norm_data/test_data/")
+    data_provider = PatchProvider("/data/Cell/norm_data/training_data/",
+                                  "/data/Cell/norm_data/test_data/")
     train_data, train_label = data_provider(5)
     for i in range(5):
         plt.imshow(train_data[i].astype(np.int32))

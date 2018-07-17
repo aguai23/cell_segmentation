@@ -1,7 +1,8 @@
 import tensorflow as tf
-from net.ops import conv2d, fc
+from net.ops import conv2d, fc, batch_norm
 import logging
 import numpy as np
+from matplotlib import pyplot as plt
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
 
@@ -20,36 +21,79 @@ class SimpleNet(object):
     def build_graph(self, input, scope=""):
 
         with tf.name_scope(scope, "simple_net"):
-            conv1 = conv2d(input, 25, [4,4], scope="conv1", padding="VALID", weight_decay=0.1, activation=tf.nn.leaky_relu)
+            conv1 = conv2d(input, 32, [4, 4], scope="conv1", padding="VALID", weight_decay=0.1)
             conv1 = tf.nn.dropout(conv1, 0.9)
             pool1 = tf.nn.max_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name="maxpool1")
 
-            conv2 = conv2d(pool1, 50, [5, 5], padding="VALID", scope="conv2", weight_decay=0.1, activation=tf.nn.leaky_relu)
+            conv2 = conv2d(pool1, 64, [5, 5], padding="VALID", scope="conv2", weight_decay=0.1)
             conv2 = tf.nn.dropout(conv2, 0.8)
             pool2 = tf.nn.max_pool(conv2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name="maxpool2")
 
-            conv3 = conv2d(pool2, 80, [6, 6], scope="conv3", padding="VALID", weight_decay=0.1, activation=tf.nn.leaky_relu)
+            conv3 = conv2d(pool2, 128, [6, 6], scope="conv3", padding="VALID", weight_decay=0.1)
             conv3 = tf.nn.dropout(conv3, 0.75)
             pool3 = tf.nn.max_pool(conv3, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name="maxpool3")
 
             dims = pool3.get_shape()[1:]
             k = dims.num_elements()
+            flatten_3 = tf.reshape(pool3, [-1, k])
+
+            # k = pool1.get_shape()[1:].num_elements()
+            # flatten_1 = tf.reshape(pool1, [-1, k])
+            #
+            # k = pool2.get_shape()[1:].num_elements()
+            # flatten_2 = tf.reshape(pool2, [-1, k])
+            #
+            # fc1 = tf.concat([flatten_1, flatten_2, flatten_3], 1)
+            fc1 = fc(flatten_3, 1024, scope="fc1", weight_decay=0.1)
+            fc1 = tf.nn.dropout(fc1, 0.5)
+
+            fc2 = fc(fc1, 1024, scope="fc2", weight_decay=0.1)
+            fc2 = tf.nn.dropout(fc2, 0.5)
+
+            output = fc(fc2, self.num_class, scope="output", activation=None)
+
+            return output
+
+    def residual_network(self, input, scope=""):
+
+        with tf.name_scope(scope, "residual_net"):
+            input = conv2d(input, 32, [1, 1], scope="dimension_increase1")
+            conv1 = conv2d(input, 32, [8, 8], scope="conv1", padding="SAME", batch_norm_params={})
+            conv2 = conv2d(conv1, 32, [8, 8], scope="conv2", padding="SAME", batch_norm_params={})
+            output1 = conv2 + input
+            pool1 = tf.nn.max_pool(output1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name="pool1")
+
+            pool1 = conv2d(pool1, 64, [1, 1], scope="dimension_increase2")
+            conv3 = conv2d(pool1, 64, [6, 6], scope="conv3", padding="SAME", batch_norm_params={})
+            conv4 = conv2d(conv3, 64, [6, 6], scope="conv4", padding="SAME", batch_norm_params={})
+            output2 = conv4 + pool1
+            pool2 = tf.nn.max_pool(output2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name="pool2")
+
+            pool2 = conv2d(pool2, 128, [1, 1], scope="dimension_increase3")
+            conv5 = conv2d(pool2, 128, [3, 3], scope="conv5", padding="SAME", batch_norm_params={})
+            conv6 = conv2d(conv5, 128, [3, 3], scope="conv6", padding="SAME", batch_norm_params={})
+            output3 = conv6 + pool2
+            pool3 = tf.nn.max_pool(output3, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name="pool3")
+
+            dims = pool3.get_shape()[1:]
+            k = dims.num_elements()
             pool3 = tf.reshape(pool3, [-1, k])
 
-            fc1 = fc(pool3, 1024, scope="fc1", weight_decay=0.1, activation=tf.nn.leaky_relu)
-            fc1 = tf.nn.dropout(fc1, 0.8)
+            fc1 = fc(pool3, 1024, scope="fc1", weight_decay=0.1)
+            fc1 = tf.nn.dropout(fc1, 0.5)
 
-            fc2 = fc(fc1, 1024, scope="fc2", weight_decay=0.1, activation=tf.nn.leaky_relu)
-            fc2 = tf.nn.dropout(fc2, 0.8)
+            fc2 = fc(fc1, 1024, scope="fc2", weight_decay=0.1)
+            fc2 = tf.nn.dropout(fc2, 0.5)
 
-            output = fc(fc2, self.num_class, scope="output")
+            output = fc(fc2, self.num_class, scope="output", activation=None)
 
             return output
 
     def get_cost(self, logits):
         regularization = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits,
-                                                                      labels=self.y)) + 0.1 * sum(regularization)
+                                                                      labels=self.y))
+        # cost = tf.losses.mean_squared_error(self.y, tf.nn.softmax(logits))
         return cost
 
     def save(self, sess, model_path):
@@ -82,6 +126,9 @@ class SimpleNet(object):
                                         feed_dict={self.x: test_patch,
                                                    self.y: label})
                 print(cost)
+                if cost > 0.5:
+                    plt.imshow(test_patch[0])
+                    plt.show()
             else:
                 logits = sess.run(self.logits,
                                   feed_dict={self.x: test_patch,
@@ -89,6 +136,6 @@ class SimpleNet(object):
             exp_logits = np.exp(logits)
             prob = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
 
-            return logits
+            return prob
         else:
             raise NotImplementedError("no model load")

@@ -5,15 +5,13 @@ from net.classification_net import SimpleNet
 from matplotlib import pyplot as plt
 import numpy as np
 
-data_provider = PatchProvider("/home/cell/norm_data/training_data/",
-                              "/home/cell/norm_data/test_data/")
+data_provider = PatchProvider("/data/Cell/norm_data/training_data/",
+                              "/data/Cell/norm_data/test_data/")
 
 simpleNet = SimpleNet()
 test_data, test_label = data_provider.verification_data()
-for i in range(1000, 1020):
-    # plt.imshow(test_data[i])
-    # plt.show()
-    simpleNet.load_model("/home/cell/yunzhe/miccai_code/classify_model/model.ckpt50")
+for i in range(50000, 50010):
+    simpleNet.load_model("/home/cell/yunzhe/miccai_code/classify_model/model.ckpt5")
     logits = simpleNet.predict(test_data[i:i + 1,...], test_label[i:i+1, ...])
     print(test_label[i])
     print(logits)

@@ -53,7 +53,7 @@ class Trainer(object):
         self.summary_op = tf.summary.merge_all()
 
     def train_unet(self, data_provider, output_path, training_iters=32, epochs=10,
-              display_step=10, save_epoch=5, restore=False, verify_epoch=10):
+                   display_step=10, save_epoch=5, restore=False, verify_epoch=10):
         save_path = os.path.join(output_path, "model.ckpt")
         init = tf.global_variables_initializer()
 
@@ -99,7 +99,7 @@ class Trainer(object):
         return save_path
 
     def train_classification(self, data_provider, output_path, training_iters=32, epochs=10,
-              display_step=10, save_epoch=5, restore=False, verify_epoch=10):
+                             display_step=10, save_epoch=5, restore=False, verify_epoch=10):
         save_path = os.path.join(output_path, "model.ckpt")
         init = tf.global_variables_initializer()
 
@@ -124,8 +124,8 @@ class Trainer(object):
 
                     if (epoch * training_iters + step) % display_step == 0:
                         summary_str, loss, logits = sess.run([self.summary_op, self.net.cost, self.net.logits],
-                                                     feed_dict={self.net.x: batch_x,
-                                                                self.net.y: batch_y})
+                                                             feed_dict={self.net.x: batch_x,
+                                                                        self.net.y: batch_y})
                         summary_writer.add_summary(summary_str, step)
                         summary_writer.flush()
                         logging.info("epoch {:}, step {:}, Minibatch Loss={:.4f}".format(epoch,
@@ -170,7 +170,7 @@ class Trainer(object):
                                                                     epoch_loss))
 
     def verification_evaluate_classification(self, sess, data_provider, epoch, summary_writer):
-        test_x, test_y= data_provider.verification_data()
+        test_x, test_y = data_provider.verification_data()
         batch_size = len(test_x)
         total_loss = 0
         index = 0

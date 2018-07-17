@@ -1,6 +1,5 @@
 import tensorflow as tf
-from tensorflow.contrib.layers import l2_regularizer
-
+from tensorflow.contrib.layers import l2_regularizer, variance_scaling_initializer
 def conv2d(inputs,
            num_filters_out,
            kernel_size,
@@ -45,7 +44,8 @@ def conv2d(inputs,
         num_filters_in = inputs.get_shape()[-1]
         weights_shape = [kernel_h, kernel_w,
                          num_filters_in, num_filters_out]
-        weights_initializer = tf.truncated_normal_initializer(stddev=stddev)
+        # weights_initializer = tf.truncated_normal_initializer(stddev=stddev)
+        weights_initializer = variance_scaling_initializer()
         regularizer = None
         if weight_decay > 0:
             regularizer = l2_regularizer(weight_decay)
@@ -89,7 +89,8 @@ def fc(inputs,
     with tf.variable_scope(scope, 'FC', [inputs]):
         num_units_in = inputs.get_shape()[1]
         weights_shape = [num_units_in, num_units_out]
-        weights_initializer = tf.truncated_normal_initializer(stddev=stddev)
+        # weights_initializer = tf.truncated_normal_initializer(stddev=stddev)
+        weights_initializer = variance_scaling_initializer()
         regularizer = None
         if weight_decay > 0:
             regularizer = l2_regularizer(weight_decay)
