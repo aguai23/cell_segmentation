@@ -13,17 +13,20 @@ class Evaluator(object):
         self.data_provider = data_provider
         self.sample_size = sample_size
 
-    def evaluate(self):
+    def evaluate(self, mode=1):
         test_data, test_mask = self.data_provider.test_data()
         self.net.load_model(self.model_path)
         average_f1 = 0.0
         average_aji = 0.0
         average_dice = 0.0
         for i in range(len(test_data)):
-            mask = self.predict(test_data[i])
+            if mode == 1:
+                mask = self.predict(test_data[i])
+            else:
+                mask = self.predict_with_sliding_window(test_data[i])
             plt.imshow(test_mask[i])
             plt.show()
-            plt.imshow(mask)
+            plt.imshow(test_data[i])
             plt.show()
             f1_score = self.f1_score(test_mask[i].astype(np.int32), mask.astype(np.int32))
             average_f1 += f1_score
@@ -174,6 +177,93 @@ class Evaluator(object):
                 break
         return self.get_segment_object(mask, contour)
 
+    def predict_with_sliding_window(self, test_image, normalization=True):
+        """
+        given a test image, generate final segmentation result
+        :param test_image: test image
+        :return: segmentation result
+        """
+        if normalization:
+            test_image = (test_image - np.average(test_image)).astype(np.float32) / np.std(test_image)
+            # test_image = test_image / 255.
+            # test_image = (test_image - np.average(test_image)).astype(np.float32)
+        width, height, _ = test_image.shape
+        nuclei_map = np.zeros((width, height), dtype=np.float32)
+        contour_map = np.zeros((width, height), dtype=np.float32)
+        half_size = int((self.sample_size - 1) / 2)
+        test_image = np.pad(test_image, ((half_size, half_size),(half_size, half_size), (0, 0)), "reflect")
+        for i in range(width):
+            input_sample = np.zeros((height, self.sample_size, self.sample_size, 3))
+            for j in range(height):
+                input_sample[j,...] = test_image[i: i + self.sample_size, j: j + self.sample_size, :]
+            probs = self.net.predict(input_sample)
+            for j in range(height):
+                input_sample[j, ...] = np.rot90(test_image[i: i + self.sample_size, j: j + self.sample_size, :], 1,
+                                                (0, 1))
+            rot_probs = self.net.predict(input_sample)
+            for j in range(height):
+                input_sample[j, ...] = np.rot90(test_image[i: i + self.sample_size, j: j + self.sample_size, :], 2,
+                                                (0, 1))
+            rot1_probs = self.net.predict(input_sample)
+            for j in range(height):
+                input_sample[j, ...] = np.rot90(test_image[i: i + self.sample_size, j: j + self.sample_size, :], 3,
+                                                (0, 1))
+            rot2_probs = self.net.predict(input_sample)
+            for j in range(height):
+                input_sample[j, ...] = np.flip(test_image[i: i + self.sample_size, j: j + self.sample_size, :], 0)
+            flip_probs = self.net.predict(input_sample)
+            for j in range(height):
+                input_sample[j, ...] = np.flip(test_image[i: i + self.sample_size, j: j + self.sample_size, :], 1)
+            flip1_probs = self.net.predict(input_sample)
+            for j in range(height):
+                nuclei_map[i][j] = (probs[j][1] + rot_probs[j][1] + rot1_probs[j][1] + rot2_probs[j][1] +
+                                    flip_probs[j][1] + flip1_probs[j][1]) / 6
+                contour_map[i][j] = (probs[j][2] + rot_probs[j][2] + rot1_probs[j][2] +
+                                     rot2_probs[j][2] + flip_probs[j][2] + flip1_probs[j][2]) / 6
+        # post process
+        plt.imshow(nuclei_map)
+        plt.show()
+        result_map = self.post_process(nuclei_map, contour_map)
+        plt.show()
+        plt.imshow(contour_map)
+        plt.show()
+        plt.imshow(result_map)
+        plt.show()
+        return result_map
+
+    def post_process(self, nuclei_map, contour_map, threshold=0.5):
+        average_contour = np.average(contour_map)
+        nuclei_map[nuclei_map > threshold] = 1
+        nuclei_map[nuclei_map <= threshold] = 0
+        nuclei_map[contour_map > 0.5] = 0
+        result_map = np.zeros(nuclei_map.shape)
+        label_map = measure.label(nuclei_map)
+        region_props = measure.regionprops(label_map)
+        for region in region_props:
+            temp_map = np.zeros(nuclei_map.shape)
+            if region.area > 30:
+                temp_map[np.where(label_map == region.label)] = 1
+                for i in range(2):
+                    temp_contour = np.multiply(temp_map, contour_map)
+                    if np.average(temp_contour) > average_contour:
+                        # temp_map = erosion(temp_map, square(3))
+                        break
+                    temp_map = dilation(temp_map, square(3))
+                result_map[np.where(temp_map == 1)] = region.label
+        return result_map
+
+
+
+    @staticmethod
+    def local_maximum(contour_map, x, y):
+        heigth, width = contour_map.shape
+        if x > 0 and contour_map[x][y] > contour_map[x - 1][y] and \
+            y > 0 and contour_map[x][y] > contour_map[x][y - 1] and \
+            x < heigth - 1 and contour_map[x][y] > contour_map[x + 1][y] \
+            and y < width - 1 and contour_map[x][y] > contour_map[x][y + 1]:
+            return True
+        return False
+
     @staticmethod
     def get_segment_object(mask, contour, area_thresh=50):
         """
@@ -199,11 +289,14 @@ class Evaluator(object):
 
 
 if __name__ == "__main__":
-    from net import deep_contour_net
-    from data import segmentation_provider
+    from net import deep_contour_net, classification_net
+    from data import segmentation_provider, patch_provider
 
-    net = deep_contour_net.DeepContourNet()
-    data_provider = segmentation_provider.SegmentationDataProvider("/home/cell/training_data/training_data/",
-                                                                   "/home/cell/training_data/test_data/")
-    evaluator = Evaluator("/home/cell/yunzhe/miccai_code/model/model.ckpt30", net, data_provider)
-    evaluator.evaluate()
+    # net = deep_contour_net.DeepContourNet()
+    # data_provider = segmentation_provider.SegmentationDataProvider("/home/cell/norm_data/training_data/",
+    #                                                                "/home/cell/norm_data/test_data/")
+    net = classification_net.SimpleNet(sample_size=51)
+    data_provider = patch_provider.PatchProvider("/data/Cell/norm_data/training_data/",
+                                                 "/data/Cell/norm_data/test_data/", test=True)
+    evaluator = Evaluator("/home/cell/yunzhe/miccai_code/classify_model/model.ckpt10", net, data_provider, sample_size=51)
+    evaluator.evaluate(mode=2)

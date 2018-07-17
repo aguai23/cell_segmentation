@@ -6,10 +6,12 @@ from matplotlib.path import Path
 from matplotlib import pyplot as plt
 import scipy.misc as mc
 import random
-from sklearn.utils import shuffle
+# from sklearn.utils import shuffle
 from shutil import rmtree
+from skimage.morphology import dilation, erosion
+import cv2
 from PIL import Image
-
+import math
 
 class SegmentationDataProvider:
 
@@ -80,6 +82,8 @@ class SegmentationDataProvider:
                     self.sample_data(filename, image, mask,
                                      contour_mask, False, sample_size, sample_number, valid_folder)
                 count += 1
+            self.train_size = len(self.train_data)
+            self.valid_size = len(self.valid_data)
 
         else:
             # load saved data
@@ -211,11 +215,12 @@ if __name__ == "__main__":
 
     data_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/MoNuSeg Training Data/Tissue images/"
     annotation_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/MoNuSeg Training Data/Annotations/"
-    train_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/training_data/"
-    test_dir = "/home/yunzhe/Downloads/MoNuSeg Training Data/test_data/"
+    train_dir = "/home/yunzhe/norm_data/training_data/"
+    test_dir = "/home/yunzhe/norm_data/test_data/"
 
     train_number = 25
     file_count = 0
+    filter = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
     for filename in os.listdir(data_dir):
         file_count += 1
         print(filename)
@@ -234,8 +239,12 @@ if __name__ == "__main__":
             tree = ET.parse(annotation_file)
             root = tree.getroot()
             mask = np.zeros((width, height))
+            contour_mask = np.zeros((width, height), np.uint8)
+            distance_mask = np.zeros((width, height), np.float32)
             # add_mask = np.zeros((width, height))
 
+            if os.path.exists(train_dir + filename_suffix + "_distance.npy"):
+                continue
             # extract each nuclear
             region_label = 1
             for region in root.iter("Region"):
@@ -247,21 +256,50 @@ if __name__ == "__main__":
                 points = np.vstack((x, y)).T
                 path = Path(polygon)
                 grid = path.contains_points(points)
-                grid = grid.reshape((width, height))
+                grid = grid.reshape((width, height)).astype(np.int32)
                 mask[np.where(grid == 1)] = region_label
                 region_label += 1
-                # mask = np.logical_or(grid, mask)
+                grid_dilation = dilation(grid, filter)
+                grid_erosion = erosion(grid, filter)
+                # calculate distance map
+                contour = grid_dilation - grid_erosion
+                contour_points = np.where(contour == 1)
+                nuclei_points = np.where(grid == 1)
+                sub_dist_map = np.zeros((width, height))
+                for i in range(len(nuclei_points[0])):
+                    x = nuclei_points[0][i]
+                    y = nuclei_points[1][i]
+                    if contour[x][y] == 1:
+                        continue
+                    min_dist = 10000
+                    for j in range(len(contour_points[0])):
+                        contour_x = contour_points[0][j]
+                        contour_y = contour_points[1][j]
+                        dist = math.sqrt((x - contour_x) ** 2 + (y - contour_y) ** 2)
+                        min_dist = min(dist, min_dist)
+                    sub_dist_map[x][y] = min_dist
+                if np.max(sub_dist_map) > 0:
+                    sub_dist_map = sub_dist_map / np.max(sub_dist_map)
+                contour_mask = np.logical_or(contour_mask, (grid_dilation - grid_erosion).astype(np.uint8))
+                distance_mask[nuclei_points] = 0
+                distance_mask += sub_dist_map
+                # cv2.drawContours(contour_mask, [np.asarray(polygon).astype(int)], 0, 1, 3)
 
+            # mask[np.where(contour_mask == 1)] = 0
+            plt.imshow(distance_mask)
+            plt.show()
+            train_set = set(os.listdir(train_dir))
             # save the result for training
-            contour_mask = find_contour(mask)
-            if file_count > train_number:
-                image.save(test_dir + filename_suffix + ".png")
-                np.save(test_dir + filename_suffix, mask)
-                np.save(test_dir + filename_suffix + "_contour", contour_mask)
-            else:
-                image.save(train_dir + filename_suffix + ".png")
+            if (filename_suffix + ".png") in train_set:
+                # image.save(train_dir + filename_suffix + ".png")
                 np.save(train_dir + filename_suffix, mask)
                 np.save(train_dir + filename_suffix + "_contour", contour_mask)
+                np.save(train_dir + filename_suffix + "_distance", distance_mask)
+            else:
+                # image.save(test_dir + filename_suffix + ".png")
+                np.save(test_dir + filename_suffix, mask)
+                np.save(test_dir + filename_suffix + "_contour", contour_mask)
+                np.save(test_dir + filename_suffix + "_distance", distance_mask)
             plt.imshow(contour_mask)
             plt.show()
             plt.imshow(mask)
