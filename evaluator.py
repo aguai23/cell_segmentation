@@ -15,6 +15,7 @@ class Evaluator(object):
 
     def evaluate(self, mode=1):
         test_data, test_mask = self.data_provider.test_data()
+        # test_data, test_mask = self.data_provider.get_train_data()
         self.net.load_model(self.model_path)
         average_f1 = 0.0
         average_aji = 0.0
@@ -24,15 +25,24 @@ class Evaluator(object):
                 mask = self.predict(test_data[i])
             else:
                 mask = self.predict_with_sliding_window(test_data[i])
+            plt.imshow(mask)
+            plt.show()
+
             plt.imshow(test_mask[i])
             plt.show()
+
             plt.imshow(test_data[i])
             plt.show()
-            f1_score = self.f1_score(test_mask[i].astype(np.int32), mask.astype(np.int32))
+
+            f1_score, miss_map, false_map = self.f1_score(test_mask[i].astype(np.int32), mask.astype(np.int32))
             average_f1 += f1_score
             aji = self.aji(test_mask[i].astype(np.int32), mask.astype(np.int32))
             average_aji += aji
             average_dice += self.dice(test_mask[i].astype(np.int32), mask.astype(np.int32))
+            plt.imshow(miss_map)
+            plt.show()
+            plt.imshow(false_map)
+            plt.show()
 
         print("average f1 " + str(average_f1 / len(test_data)))
         print("average aji " + str(average_aji / len(test_data)))
@@ -40,6 +50,8 @@ class Evaluator(object):
 
     @staticmethod
     def f1_score(true_mask, predict_mask, threshold=0.5):
+        missed_map = np.zeros(true_mask.shape)
+        false_map = np.zeros(true_mask.shape)
         ground_truth = measure.regionprops(true_mask)
         predict_regions = measure.regionprops(predict_mask)
         tp = 0
@@ -65,6 +77,10 @@ class Evaluator(object):
                         break
             if region_to_remove:
                 predict_regions.remove(region_to_remove)
+            else:
+                missed_map[np.where(true_mask == target_region.label)] = 1
+        for left_region in predict_regions:
+            false_map[np.where(predict_mask == left_region.label)] = 1
         fn = len(ground_truth) - tp
         fp = len(predict_regions)
         f1 = float(2 * tp) / (2 * tp + fp + fn)
@@ -72,7 +88,7 @@ class Evaluator(object):
         print("fn " + str(fn))
         print("tp " + str(tp))
         print("f1 score " + str(f1))
-        return f1
+        return f1, missed_map, false_map
 
     @staticmethod
     def aji(true_mask, predict_mask):
@@ -134,48 +150,61 @@ class Evaluator(object):
         print("dice " + str(dice))
         return dice
 
-    def predict(self, test_image):
+    def predict(self, test_image, output_size=219):
         """
         given an image, predict segmentation mask
         :param test_image: image array
         :return: mask array
         """
+        test_image = (test_image - np.average(test_image)) / np.std(test_image)
+
         height, width = test_image.shape[0], test_image.shape[1]
         mask = np.zeros((height, width))
         contour = np.zeros((height, width))
+        test_image = np.pad(test_image, ((self.sample_size, self.sample_size), (self.sample_size, self.sample_size),
+                            (0, 0)), "reflect")
         x, y = 0, 0
+        stride = int((self.sample_size - output_size) / 2)
         while x < height or y < width:
-            x_max = min(x + self.sample_size, height)
-            y_max = min(y + self.sample_size, width)
-            sample = np.zeros((self.sample_size, self.sample_size, 3)).astype(np.int32)
-            sample[:x_max - x, :y_max - y, :] = test_image[x:x_max, y:y_max, 0:3]
-            # mirror the sample
-            if x_max - x < self.sample_size:
-                sample[x_max - x: self.sample_size, :y_max - y, :] = np.flip(test_image[x_max - x - self.sample_size:,
-                                                                             y:y_max, 0:3], axis=0)
-            if y_max - y < self.sample_size:
-                sample[:x_max - x, y_max - y: self.sample_size, :] = np.flip(
-                    test_image[x: x_max, y_max - y - self.sample_size:,
-                    0:3], axis=1)
-            if x_max - x < self.sample_size and y_max - y < self.sample_size:
-                sample[x_max - x: self.sample_size, y_max - y: self.sample_size, :] = np.flip(
-                    np.flip(test_image[x_max - x - self.sample_size:,
-                            y_max - y - self.sample_size:, 0:3],
-                            axis=1), axis=0)
-            sample = np.reshape(sample, [1] + list(sample.shape))
-            sample_mask, sample_contour = self.net.predict(sample)
+            sample = test_image[x + self.sample_size - stride: x + self.sample_size + output_size + stride,
+                     y + self.sample_size - stride: y + self.sample_size + output_size + stride, 0:3]
+            x_max = min(x + output_size, height)
+            y_max = min(y + output_size, width)
+            # sample = np.zeros((self.sample_size, self.sample_size, 3)).astype(np.int32)
+            # sample[:x_max - x, :y_max - y, :] = test_image[x:x_max, y:y_max, 0:3]
+            # # mirror the sample
+            # if x_max - x < self.sample_size:
+            #     sample[x_max - x: self.sample_size, :y_max - y, :] = np.flip(test_image[x_max - x - self.sample_size:,
+            #                                                                  y:y_max, 0:3], axis=0)
+            # if y_max - y < self.sample_size:
+            #     sample[:x_max - x, y_max - y: self.sample_size, :] = np.flip(
+            #         test_image[x: x_max, y_max - y - self.sample_size:,
+            #         0:3], axis=1)
+            # if x_max - x < self.sample_size and y_max - y < self.sample_size:
+            #     sample[x_max - x: self.sample_size, y_max - y: self.sample_size, :] = np.flip(
+            #         np.flip(test_image[x_max - x - self.sample_size:,
+            #                 y_max - y - self.sample_size:, 0:3],
+            #                 axis=1), axis=0)
+            sample_list = [sample, (np.rot90(sample, 2)), (np.flip(sample, axis=0)), (np.flip(sample, axis=1))]
+            sample_mask_list, sample_contour_list = self.net.predict(np.asarray(sample_list))
+            sample_mask = np.average(np.asarray([sample_mask_list[0], np.rot90(sample_mask_list[1], 2),
+                                                 np.flip(sample_mask_list[2], axis=0),
+                                                 np.flip(sample_mask_list[3], axis=1)]), axis=0)
+            sample_contour = np.average(np.asarray([sample_contour_list[0], np.rot90(sample_contour_list[1], 2),
+                                                    np.flip(sample_contour_list[2], axis=0),
+                                                    np.flip(sample_contour_list[3], axis=1)]), axis=0)
             mask[x:x_max, y:y_max] = sample_mask[:x_max - x, :y_max - y]
             contour[x:x_max, y:y_max] = sample_contour[:x_max - x, :y_max - y]
 
             # update index
-            if x + self.sample_size < height:
-                x += self.sample_size
-            elif y + self.sample_size < width:
-                y += self.sample_size
+            if x + output_size < height:
+                x += output_size
+            elif y + output_size < width:
+                y += output_size
                 x = 0
             else:
                 break
-        return self.get_segment_object(mask, contour)
+        return self.post_process(mask, contour)
 
     def predict_with_sliding_window(self, test_image, normalization=True):
         """
@@ -232,27 +261,32 @@ class Evaluator(object):
         return result_map
 
     def post_process(self, nuclei_map, contour_map, threshold=0.5):
-        average_contour = np.average(contour_map)
+        plt.imshow(nuclei_map)
+        plt.show()
+        plt.imshow(contour_map)
+        plt.show()
+        average_contour = np.sum(contour_map) / len(np.where(contour_map > 0)[0])
+        nuclei_map = nuclei_map - contour_map
+        # nuclei_map[np.where(contour_map > 0.5)] = 0
         nuclei_map[nuclei_map > threshold] = 1
         nuclei_map[nuclei_map <= threshold] = 0
-        nuclei_map[contour_map > 0.5] = 0
         result_map = np.zeros(nuclei_map.shape)
         label_map = measure.label(nuclei_map)
         region_props = measure.regionprops(label_map)
+        kernel = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
         for region in region_props:
             temp_map = np.zeros(nuclei_map.shape)
-            if region.area > 30:
+            if region.area > 50:
                 temp_map[np.where(label_map == region.label)] = 1
                 for i in range(2):
                     temp_contour = np.multiply(temp_map, contour_map)
-                    if np.average(temp_contour) > average_contour:
-                        # temp_map = erosion(temp_map, square(3))
+                    average_temp = np.sum(temp_contour) / len(np.where(temp_contour > 0)[0])
+                    if average_temp > average_contour:
+                        temp_map = dilation(temp_map, square(3))
                         break
                     temp_map = dilation(temp_map, square(3))
                 result_map[np.where(temp_map == 1)] = region.label
         return result_map
-
-
 
     @staticmethod
     def local_maximum(contour_map, x, y):
@@ -265,7 +299,7 @@ class Evaluator(object):
         return False
 
     @staticmethod
-    def get_segment_object(mask, contour, area_thresh=50):
+    def get_segment_object(mask, contour, area_thresh=30):
         """
         get the final segmentation result based on mask and contour
         :param mask: mask result
@@ -274,8 +308,10 @@ class Evaluator(object):
         :return: final result, with unique integer for one region
         """
 
-        mask[np.where(contour == 1)] = 0
-        mask = dilation(mask, square(5))
+        # mask[np.where(contour == 1)] = 0
+        # mask = dilation(mask, square(5))
+        mask = mask - contour
+        mask[np.where(mask > 0.5)] = 1
         label_mask = measure.label(mask)
         region_props = measure.regionprops(label_mask)
 
@@ -285,6 +321,7 @@ class Evaluator(object):
                 points = region.coords
                 for point in points:
                     label_mask[point[0]][point[1]] = 0
+        # label_mask = dilation(label_mask, square(3))
         return label_mask
 
 
@@ -292,11 +329,12 @@ if __name__ == "__main__":
     from net import deep_contour_net, classification_net
     from data import segmentation_provider, patch_provider
 
-    # net = deep_contour_net.DeepContourNet()
-    # data_provider = segmentation_provider.SegmentationDataProvider("/home/cell/norm_data/training_data/",
-    #                                                                "/home/cell/norm_data/test_data/")
-    net = classification_net.SimpleNet(sample_size=51)
-    data_provider = patch_provider.PatchProvider("/data/Cell/norm_data/training_data/",
-                                                 "/data/Cell/norm_data/test_data/", test=True)
-    evaluator = Evaluator("/home/cell/yunzhe/miccai_code/classify_model/model.ckpt10", net, data_provider, sample_size=51)
-    evaluator.evaluate(mode=2)
+    net = deep_contour_net.DeepContourNet(cost="dice", sample_size=225)
+    data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/norm_data/training_data/",
+                                                                   "/data/Cell/norm_data/test_data/", sample_size=225,
+                                                                   test=True)
+    # net = classification_net.SimpleNet(sample_size=51)
+    # data_provider = patch_provider.PatchProvider("/data/Cell/norm_data/training_data/",
+    #                                              "/data/Cell/norm_data/test_data/", test=True)
+    evaluator = Evaluator("/data/Cell/yunzhe/cross_entropy/model.ckpt1",  net, data_provider, sample_size=225)
+    evaluator.evaluate(mode=1)

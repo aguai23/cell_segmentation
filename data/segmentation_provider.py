@@ -6,17 +6,18 @@ from matplotlib.path import Path
 from matplotlib import pyplot as plt
 import scipy.misc as mc
 import random
-# from sklearn.utils import shuffle
+from sklearn.utils import shuffle
 from shutil import rmtree
-from skimage.morphology import dilation, erosion
+from skimage.morphology import dilation, erosion, square
 import cv2
 from PIL import Image
 import math
 
+
 class SegmentationDataProvider:
 
-    def __init__(self, data_dir, test_dir, train_percent=0.7, sample_size=224, num_class=2,
-                 sample_number=100, shuffle_data=True, resample=False):
+    def __init__(self, data_dir, test_dir, train_percent=0.8, sample_size=224, num_class=2, output_size=219,
+                 sample_number=100, shuffle_data=True, resample=False, test=False):
         """
         init method of data provider
         :param data_dir: the data folder containing training and valid data
@@ -39,12 +40,17 @@ class SegmentationDataProvider:
         # image index used to generate train batch
         self.index = -1
 
+        self.output_size = output_size
         self.sample_size = sample_size
         self.num_class = num_class
         self.sample_number = sample_number
+        self.train_dir = data_dir
         self.test_dir = test_dir
         train_folder = data_dir + "train/"
         valid_folder = data_dir + "valid/"
+
+        if test:
+            return
 
         if resample or (not os.path.exists(train_folder)):
             # remove previous data
@@ -77,16 +83,18 @@ class SegmentationDataProvider:
 
                 if count < self.train_size:
                     self.sample_data(filename, image, mask,
-                                     contour_mask, True, sample_size, sample_number, train_folder)
+                                     contour_mask, True, sample_size, sample_number, train_folder,
+                                     output_size=self.output_size)
                 elif count < self.train_size + valid_limit:
                     self.sample_data(filename, image, mask,
-                                     contour_mask, False, sample_size, sample_number, valid_folder)
+                                     contour_mask, False, sample_size, sample_number, valid_folder,
+                                     output_size=self.output_size)
                 count += 1
-            self.train_size = len(self.train_data)
-            self.valid_size = len(self.valid_data)
 
         else:
             # load saved data
+            print("start loading data")
+            load_count = 0
             for filename in os.listdir(train_folder):
                 if filename.endswith("_image.npy"):
                     image = np.load(train_folder + filename)
@@ -95,6 +103,9 @@ class SegmentationDataProvider:
                     self.train_data.append(image)
                     self.train_mask.append(mask)
                     self.train_contour_mask.append(contour)
+                    load_count += 1
+                    if load_count % 10000 == 0:
+                        print(load_count)
 
             for filename in os.listdir(valid_folder):
                 if filename.endswith("_image.npy"):
@@ -105,16 +116,40 @@ class SegmentationDataProvider:
                     self.valid_mask.append(mask)
                     self.valid_contour_mask.append(contour)
 
-            self.train_size = len(self.train_data)
-            self.valid_size = len(self.valid_data)
+        augment_train_data = []
+        augment_train_label = []
+        augment_train_contour = []
+
+        for i in range(len(self.train_data)):
+            augment_train_data.append(self.train_data[i])
+            augment_train_data.append(np.rot90(self.train_data[i], 2))
+            augment_train_data.append(np.flip(self.train_data[i], axis=0))
+            augment_train_data.append(np.flip(self.train_data[i], axis=1))
+
+            augment_train_label.append(self.train_mask[i])
+            augment_train_label.append(np.rot90(self.train_mask[i], 2))
+            augment_train_label.append(np.flip(self.train_mask[i], axis=0))
+            augment_train_label.append(np.flip(self.train_mask[i], axis=1))
+
+            augment_train_contour.append(self.train_contour_mask[i])
+            augment_train_contour.append(np.rot90(self.train_contour_mask[i], 2))
+            augment_train_contour.append(np.flip(self.train_contour_mask[i], axis=0))
+            augment_train_contour.append(np.flip(self.train_contour_mask[i], axis=1))
+
+        self.train_data = augment_train_data
+        self.train_mask = augment_train_label
+        self.train_contour_mask = augment_train_contour
 
         print(len(self.train_data))
         print(len(self.valid_data))
+        self.train_size = len(self.train_data)
+        self.valid_size = len(self.valid_data)
+
         if shuffle_data:
             shuffled_train_data, shuffled_train_mask, shuffled_train_contour = shuffle(self.train_data,
                                                                                        self.train_mask,
                                                                                        self.train_contour_mask,
-                                                                                      )
+                                                                                       )
             self.train_data = shuffled_train_data
             self.train_mask = shuffled_train_mask
             self.train_contour_mask = shuffled_train_contour
@@ -122,8 +157,8 @@ class SegmentationDataProvider:
     def __call__(self, size):
 
         X = np.zeros((size, self.sample_size, self.sample_size, 3))
-        Y = np.zeros((size, self.sample_size, self.sample_size, 2))
-        Y_contour = np.zeros((size, self.sample_size, self.sample_size, 2))
+        Y = np.zeros((size, self.output_size, self.output_size, 2))
+        Y_contour = np.zeros((size, self.output_size, self.output_size, 2))
 
         for i in range(size):
             self.index += 1
@@ -135,7 +170,8 @@ class SegmentationDataProvider:
 
         return X, Y, Y_contour
 
-    def sample_data(self, filename, image, mask, contour_mask, train, sample_size, sample_number, save_folder):
+    def sample_data(self, filename, image, mask, contour_mask, train, sample_size, sample_number, save_folder,
+                    output_size=219):
         """
         sample data to generate train and valid data
         :param filename: filename
@@ -148,30 +184,68 @@ class SegmentationDataProvider:
         :param folder to save
         :return:
         """
+        print(filename)
         width, height, _ = image.shape
+        image = (image - np.average(image)) / np.std(image)
         binary_mask = np.zeros((width, height))
         binary_mask[np.where(mask >= 1)] = 1
-        for i in range(sample_number):
-            x = random.randint(0, width - sample_size)
-            y = random.randint(0, height - sample_size)
-            image_crop = image[x:x + sample_size, y:y + sample_size, 0:3]
-            mask_crop = self.convert_to_onehot(binary_mask[x:x + sample_size, y:y + sample_size])
-            contour_mask_crop = self.convert_to_onehot(contour_mask[x:x + sample_size, y:y + sample_size])
-            if train:
-                self.train_data.append(image_crop)
-                self.train_mask.append(mask_crop)
-                self.train_contour_mask.append(contour_mask_crop)
-            else:
-                self.valid_data.append(image_crop)
-                self.valid_mask.append(mask_crop)
-                self.valid_contour_mask.append(contour_mask_crop)
-            # save image as np
-            np.save(save_folder + filename + str(i) + "_image", image_crop)
-            np.save(save_folder + filename + str(i) + "_mask", mask_crop)
-            np.save(save_folder + filename + str(i) + "_contour", contour_mask_crop)
+        # binary_mask = erosion(binary_mask, square(5))
+        # output_size = ((sample_size + 1) / 2 + 1) / 2
+        step = 15
+        if not train:
+            step = 20
+        for i in range(0, width - sample_size, step):
+            for j in range(0, height - sample_size, step):
+                image_crop = image[i:i + sample_size, j:j + sample_size, 0:3]
+                center_i = i + int(sample_size / 2)
+                center_j = j + int(sample_size / 2)
+                half_output = int(output_size / 2)
+                mask_crop = self.convert_to_onehot(
+                    binary_mask[center_i - half_output: center_i + half_output + 1,
+                    center_j - half_output:center_j + half_output + 1])
+                contour_mask_crop = self.convert_to_onehot(
+                    contour_mask[center_i - half_output: center_i + half_output + 1,
+                    center_j - half_output:center_j + half_output + 1])
+                if train:
+                    self.train_data.append(image_crop)
+                    self.train_mask.append(mask_crop)
+                    self.train_contour_mask.append(contour_mask_crop)
+                else:
+                    self.valid_data.append(image_crop)
+                    self.valid_mask.append(mask_crop)
+                    self.valid_contour_mask.append(contour_mask_crop)
+
+                np.save(save_folder + filename + str(i) + str(j) + "_image", image_crop)
+                np.save(save_folder + filename + str(i) + str(j) + "_mask", mask_crop)
+                np.save(save_folder + filename + str(i) + str(j) + "_contour", contour_mask_crop)
+        # for i in range(sample_number):
+        #     x = random.randint(0, width - sample_size)
+        #     y = random.randint(0, height - sample_size)
+        #     image_crop = image[x:x + sample_size, y:y + sample_size, 0:3]
+        #     mask_crop = self.convert_to_onehot(binary_mask[x:x + sample_size, y:y + sample_size])
+        #     contour_mask_crop = self.convert_to_onehot(contour_mask[x:x + sample_size, y:y + sample_size])
+        #     if train:
+        #         self.train_data.append(image_crop)
+        #         self.train_mask.append(mask_crop)
+        #         self.train_contour_mask.append(contour_mask_crop)
+        #     else:
+        #         self.valid_data.append(image_crop)
+        #         self.valid_mask.append(mask_crop)
+        #         self.valid_contour_mask.append(contour_mask_crop)
+        #     # save image as np
+        #     np.save(save_folder + filename + str(i) + "_image", image_crop)
+        #     np.save(save_folder + filename + str(i) + "_mask", mask_crop)
+        #     np.save(save_folder + filename + str(i) + "_contour", contour_mask_crop)
 
     def verification_data(self):
-        return np.asarray(self.valid_data), np.asarray(self.valid_mask), np.asarray(self.valid_contour_mask)
+        sampled_valid_data = []
+        sampled_valid_mask = []
+        sampled_valid_contour = []
+        for i in range(0, self.valid_size):
+            sampled_valid_data.append(self.valid_data[i])
+            sampled_valid_mask.append(self.valid_mask[i])
+            sampled_valid_contour.append(self.valid_contour_mask[i])
+        return sampled_valid_data, sampled_valid_mask, sampled_valid_contour
 
     def test_data(self):
         test_data = []
@@ -182,6 +256,16 @@ class SegmentationDataProvider:
                 test_data.append(mc.imread(self.test_dir + filename))
                 test_mask.append(np.load(self.test_dir + filename_suffix + ".npy"))
         return test_data, test_mask
+
+    def get_train_data(self):
+        train_data = []
+        train_mask = []
+        for filename in os.listdir(self.train_dir):
+            if filename.endswith(".png"):
+                filename_suffix = filename.split(".")[0]
+                train_data.append(mc.imread(self.train_dir + filename))
+                train_mask.append(np.load(self.train_dir + filename_suffix + ".npy"))
+        return train_data, train_mask
 
     def convert_to_onehot(self, array):
         result = np.zeros((array.shape[0], array.shape[1], self.num_class), dtype=np.float32)
