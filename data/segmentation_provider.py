@@ -191,7 +191,7 @@ class SegmentationDataProvider:
         binary_mask[np.where(mask >= 1)] = 1
         # binary_mask = erosion(binary_mask, square(5))
         # output_size = ((sample_size + 1) / 2 + 1) / 2
-        step = 15
+        step = 20
         if not train:
             step = 20
         for i in range(0, width - sample_size, step):
@@ -250,12 +250,15 @@ class SegmentationDataProvider:
     def test_data(self):
         test_data = []
         test_mask = []
+        filenames = []
         for filename in os.listdir(self.test_dir):
             if filename.endswith(".png"):
                 filename_suffix = filename.split(".")[0]
                 test_data.append(mc.imread(self.test_dir + filename))
-                test_mask.append(np.load(self.test_dir + filename_suffix + ".npy"))
-        return test_data, test_mask
+                filenames.append(filename_suffix)
+                if os.path.exists(self.test_dir + filename_suffix + ".npy"):
+                    test_mask.append(np.load(self.test_dir + filename_suffix + ".npy"))
+        return test_data, test_mask, filenames
 
     def get_train_data(self):
         train_data = []
@@ -266,6 +269,16 @@ class SegmentationDataProvider:
                 train_data.append(mc.imread(self.train_dir + filename))
                 train_mask.append(np.load(self.train_dir + filename_suffix + ".npy"))
         return train_data, train_mask
+
+    def get_valid_data(self):
+        valid_list = ["image01.png", "image14.png", "image08.png"]
+        valid_data = []
+        valid_mask = []
+        for filename in valid_list:
+            filename_suffix = filename.split(".")[0]
+            valid_data.append(mc.imread(self.train_dir + filename))
+            valid_mask.append(np.load(self.train_dir + filename_suffix + ".npy"))
+        return valid_data, valid_mask
 
     def convert_to_onehot(self, array):
         result = np.zeros((array.shape[0], array.shape[1], self.num_class), dtype=np.float32)

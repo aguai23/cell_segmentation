@@ -190,7 +190,9 @@ def resnet_v1(inputs,
                         if output_stride % 4 != 0:
                             raise ValueError('The output_stride needs to be a multiple of 4.')
                         output_stride /= 4
-                    net = resnet_utils.conv2d_same(net, 64, 7, stride=2, scope='conv1')
+                    net = resnet_utils.conv2d_same(net, 32, 3, stride=1, rate=1, scope="conv0")
+                    net = slim.utils.collect_named_outputs(end_points_collection, "pool0", net)
+                    net = resnet_utils.conv2d_same(net, 64, 7, stride=2, rate=1, scope='conv1')
                     net = slim.utils.collect_named_outputs(end_points_collection, "pool1", net)
                     net = slim.max_pool2d(net, [3, 3], stride=2, scope='pool1')
 

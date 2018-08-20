@@ -191,11 +191,15 @@ def stack_blocks_dense(net, blocks, output_stride=None,
                         rate *= unit_stride
 
                     else:
+                        if unit_stride == 1:
+                            rate = 2
+                        else:
+                            rate = 1
                         net = block.unit_fn(net,
                                             depth=unit_depth,
                                             depth_bottleneck=unit_depth_bottleneck,
                                             stride=unit_stride,
-                                            rate=1)
+                                            rate=rate)
                         current_stride *= unit_stride
             print(sc.name, net.shape)
             net = slim.utils.collect_named_outputs(outputs_collections, sc.name, net)

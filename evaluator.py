@@ -3,50 +3,64 @@ import numpy as np
 from skimage import measure
 from matplotlib import pyplot as plt
 from skimage.morphology import square, dilation, erosion
-
+from scipy.misc import imresize
 
 class Evaluator(object):
 
-    def __init__(self, model_path, net, data_provider, sample_size=224):
+    def __init__(self, model_path, net, data_provider, sample_size=224, output_size=219):
         self.model_path = model_path
         self.net = net
         self.data_provider = data_provider
         self.sample_size = sample_size
+        self.output_size = output_size
 
     def evaluate(self, mode=1):
-        test_data, test_mask = self.data_provider.test_data()
+        test_data, test_mask, filenames = self.data_provider.test_data()
         # test_data, test_mask = self.data_provider.get_train_data()
+        # test_data, test_mask = self.data_provider.get_valid_data()
         self.net.load_model(self.model_path)
         average_f1 = 0.0
         average_aji = 0.0
         average_dice = 0.0
         for i in range(len(test_data)):
             if mode == 1:
-                mask = self.predict(test_data[i])
-            else:
+                mask = self.predict(test_data[i], output_size=self.output_size)
+            elif mode == 2:
                 mask = self.predict_with_sliding_window(test_data[i])
+            else:
+                mask = self.predict_whole(test_data[i], filenames[i])
             plt.imshow(mask)
             plt.show()
-
-            plt.imshow(test_mask[i])
-            plt.show()
-
+            if len(test_mask) > i:
+                plt.imshow(test_mask[i])
+                plt.show()
+                f1_score, miss_map, false_map = self.f1_score(test_mask[i].astype(np.int32), mask.astype(np.int32))
+                average_f1 += f1_score
+                aji = self.aji(test_mask[i].astype(np.int32), mask.astype(np.int32))
+                average_aji += aji
+                average_dice += self.dice(test_mask[i].astype(np.int32), mask.astype(np.int32))
+                plt.imshow(miss_map)
+                plt.show()
+                plt.imshow(false_map)
+                plt.show()
+            assert mask.shape[0] == test_data[i].shape[0] and mask.shape[1] == test_data[i].shape[1]
+            self.save_result(mask, filenames[i], "/data/Cell/yunzhe/result/")
             plt.imshow(test_data[i])
-            plt.show()
-
-            f1_score, miss_map, false_map = self.f1_score(test_mask[i].astype(np.int32), mask.astype(np.int32))
-            average_f1 += f1_score
-            aji = self.aji(test_mask[i].astype(np.int32), mask.astype(np.int32))
-            average_aji += aji
-            average_dice += self.dice(test_mask[i].astype(np.int32), mask.astype(np.int32))
-            plt.imshow(miss_map)
-            plt.show()
-            plt.imshow(false_map)
             plt.show()
 
         print("average f1 " + str(average_f1 / len(test_data)))
         print("average aji " + str(average_aji / len(test_data)))
         print("average dice " + str(average_dice / len(test_data)))
+
+    def save_result(self, mask, filename, save_dir):
+        filename = save_dir + filename + "_mask.txt"
+        height = mask.shape[0]
+        width = mask.shape[1]
+        with open(filename, 'a') as file:
+            file.write(str(width) + " " + str(height) + "\n")
+            for i in range(height):
+                for j in range(width):
+                    file.write(str(int(mask[i][j])) + "\n")
 
     @staticmethod
     def f1_score(true_mask, predict_mask, threshold=0.5):
@@ -71,6 +85,7 @@ class Evaluator(object):
                         predict_set.add(str(coord))
                     union = len(target_set & predict_set)
                     iou = float(union) / (target_region.area + predict_region.area - union)
+                    # iou = float(union) / target_region.area
                     if iou > threshold:
                         tp += 1
                         region_to_remove = predict_region
@@ -146,9 +161,31 @@ class Evaluator(object):
                     union += 1
                 elif true_mask[i][j] > 0 or predict_mask[i][j] > 0:
                     union += 1
-        dice = float(overlap) / union
+        dice =  float(overlap) / union
         print("dice " + str(dice))
         return dice
+
+    def predict_whole(self, test_image, filename):
+        test_image = (test_image - np.average(test_image)) / np.std(test_image)
+        height = self.output_size
+        width = self.output_size
+        if test_image.shape[0] != self.output_size or test_image.shape[1] != self.output_size:
+            height = test_image.shape[0]
+            width = test_image.shape[1]
+            test_image = imresize(test_image, (self.output_size, self.output_size, 3))
+        image_list = [test_image, np.rot90(test_image, 2), np.flip(test_image, axis=0), np.flip(test_image, axis=1)]
+
+        mask_list, contour_list = self.net.predict(np.asarray(image_list))
+        mask = np.average(np.asarray([mask_list[0], np.rot90(mask_list[1], 2),
+                                                 np.flip(mask_list[2], axis=0),
+                                                 np.flip(mask_list[3], axis=1)]), axis=0)
+        contour = np.average(np.asarray([contour_list[0], np.rot90(contour_list[1], 2),
+                                                np.flip(contour_list[2], axis=0),
+                                                np.flip(contour_list[3], axis=1)]), axis=0)
+        mask = imresize(mask, (height, width), mode="F")
+        contour = imresize(contour, (height, width), mode="F")
+
+        return self.post_process(mask, contour, filename=filename)
 
     def predict(self, test_image, output_size=219):
         """
@@ -170,21 +207,6 @@ class Evaluator(object):
                      y + self.sample_size - stride: y + self.sample_size + output_size + stride, 0:3]
             x_max = min(x + output_size, height)
             y_max = min(y + output_size, width)
-            # sample = np.zeros((self.sample_size, self.sample_size, 3)).astype(np.int32)
-            # sample[:x_max - x, :y_max - y, :] = test_image[x:x_max, y:y_max, 0:3]
-            # # mirror the sample
-            # if x_max - x < self.sample_size:
-            #     sample[x_max - x: self.sample_size, :y_max - y, :] = np.flip(test_image[x_max - x - self.sample_size:,
-            #                                                                  y:y_max, 0:3], axis=0)
-            # if y_max - y < self.sample_size:
-            #     sample[:x_max - x, y_max - y: self.sample_size, :] = np.flip(
-            #         test_image[x: x_max, y_max - y - self.sample_size:,
-            #         0:3], axis=1)
-            # if x_max - x < self.sample_size and y_max - y < self.sample_size:
-            #     sample[x_max - x: self.sample_size, y_max - y: self.sample_size, :] = np.flip(
-            #         np.flip(test_image[x_max - x - self.sample_size:,
-            #                 y_max - y - self.sample_size:, 0:3],
-            #                 axis=1), axis=0)
             sample_list = [sample, (np.rot90(sample, 2)), (np.flip(sample, axis=0)), (np.flip(sample, axis=1))]
             sample_mask_list, sample_contour_list = self.net.predict(np.asarray(sample_list))
             sample_mask = np.average(np.asarray([sample_mask_list[0], np.rot90(sample_mask_list[1], 2),
@@ -260,23 +282,28 @@ class Evaluator(object):
         plt.show()
         return result_map
 
-    def post_process(self, nuclei_map, contour_map, threshold=0.5):
+    def post_process(self, nuclei_map, contour_map, threshold=0.5, filename=None):
         plt.imshow(nuclei_map)
         plt.show()
         plt.imshow(contour_map)
         plt.show()
         average_contour = np.sum(contour_map) / len(np.where(contour_map > 0)[0])
-        nuclei_map = nuclei_map - contour_map
-        # nuclei_map[np.where(contour_map > 0.5)] = 0
+        if filename == "image09":
+            nuclei_map = dilation(nuclei_map, square(3))
+            nuclei_map[np.where(contour_map > 0.5)] = 0
+        else:
+            nuclei_map = nuclei_map - contour_map
         nuclei_map[nuclei_map > threshold] = 1
         nuclei_map[nuclei_map <= threshold] = 0
         result_map = np.zeros(nuclei_map.shape)
-        label_map = measure.label(nuclei_map)
+        nuclei_map = erosion(nuclei_map, square(3))
+        label_map = measure.label(nuclei_map, connectivity=1)
+        nuclei_map = dilation(nuclei_map, square(3))
         region_props = measure.regionprops(label_map)
         kernel = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
         for region in region_props:
             temp_map = np.zeros(nuclei_map.shape)
-            if region.area > 50:
+            if region.area > 0:
                 temp_map[np.where(label_map == region.label)] = 1
                 for i in range(2):
                     temp_contour = np.multiply(temp_map, contour_map)
@@ -284,7 +311,7 @@ class Evaluator(object):
                     if average_temp > average_contour:
                         temp_map = dilation(temp_map, square(3))
                         break
-                    temp_map = dilation(temp_map, square(3))
+                    temp_map = dilation(temp_map, kernel)
                 result_map[np.where(temp_map == 1)] = region.label
         return result_map
 
@@ -329,12 +356,13 @@ if __name__ == "__main__":
     from net import deep_contour_net, classification_net
     from data import segmentation_provider, patch_provider
 
-    net = deep_contour_net.DeepContourNet(cost="dice", sample_size=225)
-    data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/norm_data/training_data/",
-                                                                   "/data/Cell/norm_data/test_data/", sample_size=225,
-                                                                   test=True)
+    net = deep_contour_net.DeepContourNet(cost="dice", sample_size=500, output_size=500)
+    data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/yunzhe/norm_data_new/",
+                                                                   "/data/Cell/norm_test_images/", sample_size=500,
+                                                                   test=True, output_size=500)
     # net = classification_net.SimpleNet(sample_size=51)
     # data_provider = patch_provider.PatchProvider("/data/Cell/norm_data/training_data/",
     #                                              "/data/Cell/norm_data/test_data/", test=True)
-    evaluator = Evaluator("/data/Cell/yunzhe/cross_entropy/model.ckpt1",  net, data_provider, sample_size=225)
+    evaluator = Evaluator("/data/Cell/yunzhe/new_data_more/model.ckpt48",  net, data_provider, sample_size=500,
+                          output_size=500)
     evaluator.evaluate(mode=1)
