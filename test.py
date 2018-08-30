@@ -1,9 +1,11 @@
 from net.deep_contour_net import DeepContourNet
+from net.adversarial_net import AdversarialNet
 from data.segmentation_provider import SegmentationDataProvider
 from data.patch_provider import PatchProvider
 from net.classification_net import SimpleNet
 from matplotlib import pyplot as plt
 import numpy as np
+import scipy.misc as mc
 
 # data_provider = PatchProvider("/data/Cell/norm_data/training_data/",
 #                               "/data/Cell/norm_data/test_data/")
@@ -17,18 +19,21 @@ import numpy as np
 #     print(logits)
 data_provider = SegmentationDataProvider("/data/Cell/norm_data/training_data/",
                                          "/data/Cell/norm_data/test_data/", sample_size=225)
-net = DeepContourNet(cost="dice", sample_size=225)
+net = AdversarialNet()
 test_data, test_mask, test_contour = data_provider.verification_data()
 for i in range(100,105):
     plt.imshow(test_data[i])
     plt.show()
-    plt.imshow(np.argmax(test_mask[i], axis=2))
+    true_mask = np.argmax(test_mask[i], axis=2)
+    true_mask = mc.imresize(true_mask, (57, 57), interp="nearest") / 255.
+    print(true_mask)
+    plt.imshow(true_mask)
     plt.show()
     input = np.reshape(test_data[i], [1] + list(test_data[i].shape))
     mask_label = np.reshape(test_mask[i],[1] + list(test_mask[i].shape))
     mask_contour = np.reshape(test_contour[i],[1] + list(test_contour[i].shape))
-    net.load_model("/data/Cell/yunzhe/cross_entropy/model.ckpt100")
-    mask1, contour= net.predict(input, mask_label, mask_contour)
+    net.load_model("/data/Cell/yunzhe/resnet/model.ckpt0")
+    mask1, contour = net.predict(input, mask_label, mask_contour)
     plt.imshow(mask1[0, ...])
     plt.show()
     plt.imshow(contour[0, ...])

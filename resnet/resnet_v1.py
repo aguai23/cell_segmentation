@@ -99,8 +99,10 @@ def bottleneck(inputs, depth, depth_bottleneck, stride, rate=1,
 
         residual = slim.conv2d(inputs, depth_bottleneck, [1, 1], stride=1,
                                scope='conv1')
-        residual = resnet_utils.conv2d_same(residual, depth_bottleneck, 3, stride,
-                                            rate=rate, scope='conv2')
+
+        residual = slim.conv2d(residual, depth_bottleneck, [3, 3], stride=1, rate=rate,
+                               scope='conv2')
+
         residual = slim.conv2d(residual, depth, [1, 1], stride=1,
                                activation_fn=None, scope='conv3')
 
@@ -210,20 +212,6 @@ def resnet_v1(inputs,
                     end_points['pool3'] = end_points['Detection/resnet_v1_50/block1']
                     end_points['pool4'] = end_points['Detection/resnet_v1_50/block2']
                 end_points['pool5'] = net
-                # if global_pool:
-                #     # Global average pooling.
-                #     net = tf.reduce_mean(net, [1, 2], name='pool5', keep_dims=True)
-                # if num_classes is not None:
-                #     net = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
-                #                       normalizer_fn=None, scope='logits')
-                # if spatial_squeeze:
-                #     logits = tf.squeeze(net, [1, 2], name='SpatialSqueeze')
-                # else:
-                #     logits = net
-                # # Convert end_points_collection into a dictionary of end_points.
-                # end_points = slim.utils.convert_collection_to_dict(end_points_collection)
-                # if num_classes is not None:
-                #     end_points['predictions'] = slim.softmax(logits, scope='predictions')
                 return net, end_points
 
 
@@ -338,7 +326,6 @@ def resnet_v1_200(inputs,
 
 
 resnet_v1_200.default_image_size = resnet_v1.default_image_size
-
 
 if __name__ == '__main__':
     input = tf.placeholder(tf.float32, shape=(None, 224, 224, 3), name='input')

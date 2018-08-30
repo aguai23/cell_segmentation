@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 from skimage.morphology import square, dilation, erosion
 from scipy.misc import imresize
 
+
 class Evaluator(object):
 
     def __init__(self, model_path, net, data_provider, sample_size=224, output_size=219):
@@ -15,7 +16,7 @@ class Evaluator(object):
         self.output_size = output_size
 
     def evaluate(self, mode=1):
-        test_data, test_mask, filenames = self.data_provider.test_data()
+        test_data, test_mask, filenames = self.data_provider.get_test_data()
         # test_data, test_mask = self.data_provider.get_train_data()
         # test_data, test_mask = self.data_provider.get_valid_data()
         self.net.load_model(self.model_path)
@@ -44,7 +45,7 @@ class Evaluator(object):
                 plt.imshow(false_map)
                 plt.show()
             assert mask.shape[0] == test_data[i].shape[0] and mask.shape[1] == test_data[i].shape[1]
-            self.save_result(mask, filenames[i], "/data/Cell/yunzhe/result/")
+            # self.save_result(mask, filenames[i], "/data/Cell/yunzhe/result/")
             plt.imshow(test_data[i])
             plt.show()
 
@@ -84,8 +85,8 @@ class Evaluator(object):
                     for coord in predict_region.coords:
                         predict_set.add(str(coord))
                     union = len(target_set & predict_set)
-                    iou = float(union) / (target_region.area + predict_region.area - union)
-                    # iou = float(union) / target_region.area
+                    # iou = float(union) / (target_region.area + predict_region.area - union)
+                    iou = float(union) / target_region.area
                     if iou > threshold:
                         tp += 1
                         region_to_remove = predict_region
@@ -111,6 +112,7 @@ class Evaluator(object):
         predict_regions = measure.regionprops(predict_mask)
         c = 0.0
         u = 0.0
+        region_set = set()
         for target_region in ground_truth:
             target_box = target_region.bbox
             target_set = set()
@@ -141,10 +143,11 @@ class Evaluator(object):
                 u += sub_u
                 c += sub_c
             if region_to_remove:
-                predict_regions.remove(region_to_remove)
+                region_set.add(region_to_remove.label)
 
-        for left_region in predict_regions:
-            u += left_region.area
+        for region in predict_regions:
+            if region.label not in region_set:
+                u += region.area
         aji = c / u
         print("aji " + str(aji))
         return aji
@@ -158,10 +161,10 @@ class Evaluator(object):
             for j in range(width):
                 if true_mask[i][j] > 0 and predict_mask[i][j] > 0:
                     overlap += 1
-                    union += 1
+                    union += 2
                 elif true_mask[i][j] > 0 or predict_mask[i][j] > 0:
                     union += 1
-        dice =  float(overlap) / union
+        dice = 2 * float(overlap) / union
         print("dice " + str(dice))
         return dice
 
@@ -177,11 +180,11 @@ class Evaluator(object):
 
         mask_list, contour_list = self.net.predict(np.asarray(image_list))
         mask = np.average(np.asarray([mask_list[0], np.rot90(mask_list[1], 2),
-                                                 np.flip(mask_list[2], axis=0),
-                                                 np.flip(mask_list[3], axis=1)]), axis=0)
+                                      np.flip(mask_list[2], axis=0),
+                                      np.flip(mask_list[3], axis=1)]), axis=0)
         contour = np.average(np.asarray([contour_list[0], np.rot90(contour_list[1], 2),
-                                                np.flip(contour_list[2], axis=0),
-                                                np.flip(contour_list[3], axis=1)]), axis=0)
+                                         np.flip(contour_list[2], axis=0),
+                                         np.flip(contour_list[3], axis=1)]), axis=0)
         mask = imresize(mask, (height, width), mode="F")
         contour = imresize(contour, (height, width), mode="F")
 
@@ -199,7 +202,7 @@ class Evaluator(object):
         mask = np.zeros((height, width))
         contour = np.zeros((height, width))
         test_image = np.pad(test_image, ((self.sample_size, self.sample_size), (self.sample_size, self.sample_size),
-                            (0, 0)), "reflect")
+                                         (0, 0)), "reflect")
         x, y = 0, 0
         stride = int((self.sample_size - output_size) / 2)
         while x < height or y < width:
@@ -242,11 +245,11 @@ class Evaluator(object):
         nuclei_map = np.zeros((width, height), dtype=np.float32)
         contour_map = np.zeros((width, height), dtype=np.float32)
         half_size = int((self.sample_size - 1) / 2)
-        test_image = np.pad(test_image, ((half_size, half_size),(half_size, half_size), (0, 0)), "reflect")
+        test_image = np.pad(test_image, ((half_size, half_size), (half_size, half_size), (0, 0)), "reflect")
         for i in range(width):
             input_sample = np.zeros((height, self.sample_size, self.sample_size, 3))
             for j in range(height):
-                input_sample[j,...] = test_image[i: i + self.sample_size, j: j + self.sample_size, :]
+                input_sample[j, ...] = test_image[i: i + self.sample_size, j: j + self.sample_size, :]
             probs = self.net.predict(input_sample)
             for j in range(height):
                 input_sample[j, ...] = np.rot90(test_image[i: i + self.sample_size, j: j + self.sample_size, :], 1,
@@ -282,17 +285,19 @@ class Evaluator(object):
         plt.show()
         return result_map
 
-    def post_process(self, nuclei_map, contour_map, threshold=0.5, filename=None):
+    @staticmethod
+    def post_process(nuclei_map, contour_map, threshold=0.5, filename=None):
         plt.imshow(nuclei_map)
         plt.show()
         plt.imshow(contour_map)
         plt.show()
         average_contour = np.sum(contour_map) / len(np.where(contour_map > 0)[0])
-        if filename == "image09":
-            nuclei_map = dilation(nuclei_map, square(3))
-            nuclei_map[np.where(contour_map > 0.5)] = 0
-        else:
-            nuclei_map = nuclei_map - contour_map
+        # if filename == "image09":
+        #     nuclei_map = dilation(nuclei_map, square(3))
+        #     nuclei_map[np.where(contour_map > 0.5)] = 0
+        # else:
+        #     nuclei_map = nuclei_map - contour_map
+        nuclei_map[np.where(contour_map > 0.5)] = 0
         nuclei_map[nuclei_map > threshold] = 1
         nuclei_map[nuclei_map <= threshold] = 0
         result_map = np.zeros(nuclei_map.shape)
@@ -303,15 +308,17 @@ class Evaluator(object):
         kernel = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
         for region in region_props:
             temp_map = np.zeros(nuclei_map.shape)
-            if region.area > 0:
+            if region.area > 30:
                 temp_map[np.where(label_map == region.label)] = 1
+                previous = 0
                 for i in range(2):
                     temp_contour = np.multiply(temp_map, contour_map)
-                    average_temp = np.sum(temp_contour) / len(np.where(temp_contour > 0)[0])
-                    if average_temp > average_contour:
-                        temp_map = dilation(temp_map, square(3))
+                    average_temp = np.sum(temp_contour) / len(np.where(temp_map > 0)[0])
+                    if average_temp < previous:
+                        # temp_map = dilation(temp_map, square(3))
                         break
-                    temp_map = dilation(temp_map, kernel)
+                    temp_map = dilation(temp_map, square(3))
+                    previous = average_temp
                 result_map[np.where(temp_map == 1)] = region.label
         return result_map
 
@@ -319,9 +326,9 @@ class Evaluator(object):
     def local_maximum(contour_map, x, y):
         heigth, width = contour_map.shape
         if x > 0 and contour_map[x][y] > contour_map[x - 1][y] and \
-            y > 0 and contour_map[x][y] > contour_map[x][y - 1] and \
-            x < heigth - 1 and contour_map[x][y] > contour_map[x + 1][y] \
-            and y < width - 1 and contour_map[x][y] > contour_map[x][y + 1]:
+                y > 0 and contour_map[x][y] > contour_map[x][y - 1] and \
+                x < heigth - 1 and contour_map[x][y] > contour_map[x + 1][y] \
+                and y < width - 1 and contour_map[x][y] > contour_map[x][y + 1]:
             return True
         return False
 
@@ -353,16 +360,15 @@ class Evaluator(object):
 
 
 if __name__ == "__main__":
-    from net import deep_contour_net, classification_net
+    from net import deep_contour_net, adversarial_net
     from data import segmentation_provider, patch_provider
 
-    net = deep_contour_net.DeepContourNet(cost="dice", sample_size=500, output_size=500)
-    data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/yunzhe/norm_data_new/",
-                                                                   "/data/Cell/norm_test_images/", sample_size=500,
-                                                                   test=True, output_size=500)
-    # net = classification_net.SimpleNet(sample_size=51)
-    # data_provider = patch_provider.PatchProvider("/data/Cell/norm_data/training_data/",
-    #                                              "/data/Cell/norm_data/test_data/", test=True)
-    evaluator = Evaluator("/data/Cell/yunzhe/new_data_more/model.ckpt48",  net, data_provider, sample_size=500,
-                          output_size=500)
+    # net = deep_contour_net.DeepContourNet(cost="dice", sample_size=225, output_size=225)
+    net = adversarial_net.AdversarialNet(output_size=225)
+    data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/norm_data/training_data/",
+                                                                   "/data/Cell/norm_data/test_data/", sample_size=225,
+                                                                   test=True, output_size=225)
+
+    evaluator = Evaluator("/data/Cell/yunzhe/resnet_attention/model.ckpt1", net, data_provider, sample_size=225,
+                          output_size=225)
     evaluator.evaluate(mode=1)

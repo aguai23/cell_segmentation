@@ -1,7 +1,6 @@
 from data import segmentation_provider
-from trainer import Trainer
+from trainer.trainer import Trainer
 from net.deep_contour_net import DeepContourNet
-from net.classification_net import SimpleNet
 
 deepNet = DeepContourNet(cost="fuse", sample_size=225, output_size=225)
 data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/norm_data_new/",
