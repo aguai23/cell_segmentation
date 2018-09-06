@@ -364,11 +364,11 @@ if __name__ == "__main__":
     from data import segmentation_provider, patch_provider
 
     # net = deep_contour_net.DeepContourNet(cost="dice", sample_size=225, output_size=225)
-    net = adversarial_net.AdversarialNet(output_size=225)
+    net = adversarial_net.AdversarialNet(output_size=225, height=225, width=225)
     data_provider = segmentation_provider.SegmentationDataProvider("/data/Cell/norm_data/training_data/",
                                                                    "/data/Cell/norm_data/test_data/", sample_size=225,
                                                                    test=True, output_size=225)
 
-    evaluator = Evaluator("/data/Cell/yunzhe/resnet_attention/model.ckpt1", net, data_provider, sample_size=225,
+    evaluator = Evaluator("/data/Cell/yunzhe/resnet_101/model.ckpt28", net, data_provider, sample_size=225,
                           output_size=225)
     evaluator.evaluate(mode=1)

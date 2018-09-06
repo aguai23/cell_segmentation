@@ -100,8 +100,15 @@ def bottleneck(inputs, depth, depth_bottleneck, stride, rate=1,
         residual = slim.conv2d(inputs, depth_bottleneck, [1, 1], stride=1,
                                scope='conv1')
 
-        residual = slim.conv2d(residual, depth_bottleneck, [3, 3], stride=1, rate=rate,
-                               scope='conv2')
+        if stride == 1:
+            residual = slim.conv2d(residual, depth_bottleneck, [3, 3], stride=1, rate=1, scope="conv2_1", activation_fn=None)
+            # residual = slim.batch_norm(residual)
+            # residual = tf.nn.relu(residual)
+            # residual = slim.conv2d(residual, depth_bottleneck, [3, 3], stride=1, scope="conv2_2")
+            # residual_2 = slim.conv2d(residual, depth_bottleneck, [3, 3], stride=1, rate=2, scope="conv2_2")
+            # residual = residual_1 + residual_2
+        else:
+            residual = slim.conv2d(residual, depth_bottleneck, [3, 3], stride=stride, rate=rate, scope="conv2")
 
         residual = slim.conv2d(residual, depth, [1, 1], stride=1,
                                activation_fn=None, scope='conv3')

@@ -19,6 +19,7 @@ class AdverTrainer(object):
         self.training_iters = training_iters
         discriminate_variables = net.get_discriminate_variable()
         generate_variables = net.get_generate_variable()
+        self.initial_rate = learning_rate
         self.learning_rate = tf.placeholder("float")
         self.judge_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(
             net.judge_loss,
@@ -40,15 +41,18 @@ class AdverTrainer(object):
             init = tf.global_variables_initializer()
             sess.run(init)
             ckpt = tf.train.get_checkpoint_state(output_path)
+            start_epoch = 0
             if ckpt and ckpt.model_checkpoint_path:
                 variables = slim.get_variables_to_restore()
                 variables_to_restore = [v for v in variables if v.name.split('/')[0] != "judgeNet"]
                 saver = tf.train.Saver(variables_to_restore)
                 saver.restore(sess, ckpt.model_checkpoint_path)
+                model_path = ckpt.model_checkpoint_path.split(".")
+                start_epoch = int("".join(model_path[1][4:])) + 1
                 logging.info("model restored from file " + ckpt.model_checkpoint_path)
             summary_op = tf.summary.merge_all()
             summary_writer = tf.summary.FileWriter(output_path, graph=sess.graph)
-            for epoch in range(training_epochs):
+            for epoch in range(start_epoch, training_epochs):
                 for step in range(epoch * self.training_iters, (epoch + 1) * self.training_iters):
                     if epoch >= start_adversarial:
                         # train annotated data
@@ -115,7 +119,7 @@ class AdverTrainer(object):
                                                                              self.net.contour_mask: batch_y_contour,
                                                                              self.net.judge_label: label,
                                                                              self.net.judge_weight: 0.0,
-                                                                             self.learning_rate: max(0.01 / (epoch + 1),
+                                                                             self.learning_rate: max(self.initial_rate / (epoch + 1),
                                                                                                      1e-5)})
 
                     if step % display_step == 0:
@@ -252,5 +256,5 @@ if __name__ == "__main__":
                                                                    sample_number=3000, sample_size=225, output_size=225,
                                                                    train_percent=0.9)
     trainer = AdverTrainer(net, batch_size=1, learning_rate=0.001, training_iters=5000)
-    trainer.adversarial_train(data_provider, "/data/Cell/yunzhe/resnet_attention/", start_adversarial=30, start_judge=30,
-                              display_step=500, training_epochs=30)
+    trainer.adversarial_train(data_provider, "/data/Cell/yunzhe/resnet_101/", start_adversarial=100, start_judge=100,
+                              display_step=500, training_epochs=50)

@@ -106,7 +106,7 @@ class AdversarialNet(object):
                                 weights_regularizer=slim.l2_regularizer(1e-4)):
                 f = [end_points['pool5'], end_points['pool4'],
                      end_points['pool3'], end_points['pool2']]
-                global_pool = tf.reduce_mean(f[0], [1, 2], name='pool5', keep_dims=True)
+
                 for i in range(4):
                     print('Shape of f_{} {}'.format(i, f[i].shape))
                 g = [None, None, None, None]
@@ -114,14 +114,13 @@ class AdversarialNet(object):
                 num_outputs = [256, 128, 64, 32, 32, 16]
                 for i in range(4):
                     if i == 0:
+                        global_pool = tf.reduce_mean(f[0], [1, 2], name='pool5', keep_dims=True)
                         global_pool = self.unpool(global_pool, size=[tf.shape(f[i])[1], tf.shape(f[i])[2]])
                         global_pool = self.residual_block(global_pool, num_outputs[i])
-                        # h[i] = tf.concat([f[i], global_pool],
-                        #                  axis=-1)
                         f[i] = self.residual_block(f[i], num_outputs[i])
                         h[i] = self.channel_block(global_pool, f[i], num_outputs[i])
+                        # h[i] = f[i]
                     else:
-                        # c1_1 = tf.concat([g[i - 1], f[i]], axis=-1)
                         f[i] = self.residual_block(f[i], num_outputs[i])
                         h[i] = self.channel_block(g[i - 1], f[i], num_outputs[i])
 
@@ -154,7 +153,7 @@ class AdversarialNet(object):
     @staticmethod
     def residual_block(input, output_channel):
         plain = slim.conv2d(input, output_channel, [1, 1])
-        conv = slim.conv2d(plain, output_channel, [3, 3], activation_fn=None)
+        conv = slim.conv2d(plain, output_channel, [3, 3], activation_fn=None, rate=1)
         conv = slim.batch_norm(conv)
         conv = tf.nn.relu(conv)
         conv = slim.conv2d(conv, output_channel, [3, 3], activation_fn=None)
